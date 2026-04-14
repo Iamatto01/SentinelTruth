@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SentinelTruth — Malaysian Political Fact-Checker</title>
+  <meta name="description" content="AI-powered political fact-checking platform for Malaysia. Verify claims, track political parties, and see the truth behind the headlines.">
+  <meta name="keywords" content="Malaysia, political fact check, PH, PN, PAS, PKR, UMNO, DAP, Bersatu, truth, hoax, misinformation">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/styles/main.css">
+</head>
+<body>
+  <nav class="navbar" id="navbar">
+    <div class="nav-container">
+      <a href="#dashboard" class="nav-logo">
+        <span class="logo-icon">🛡️</span>
+        <span class="logo-text">Sentinel<span class="logo-accent">Truth</span></span>
+      </a>
+      <div class="nav-links" id="nav-links">
+        <a href="#dashboard" class="nav-link active" data-section="dashboard">
+          <span class="nav-icon">📊</span> <span class="nav-label">Dashboard</span>
+        </a>
+        <a href="#topics" class="nav-link" data-section="topics">
+          <span class="nav-icon">📰</span> <span class="nav-label">Topics</span>
+        </a>
+        <a href="#statistics" class="nav-link" data-section="statistics">
+          <span class="nav-icon">📈</span> <span class="nav-label">Statistics</span>
+        </a>
+        <a href="#agent" class="nav-link" data-section="agent">
+          <span class="nav-icon">🤖</span> <span class="nav-label">AI Agent</span>
+        </a>
+      </div>
+      <div class="nav-right">
+        <!-- Language Switcher -->
+        <div class="lang-switcher" id="lang-switcher">
+          <button class="lang-toggle" id="lang-toggle" onclick="document.getElementById('lang-dropdown').classList.toggle('active')">
+            🌐 <span id="current-lang-flag">🇬🇧</span>
+          </button>
+          <div class="lang-dropdown" id="lang-dropdown">
+            <button class="lang-option" onclick="switchLanguage('en')">🇬🇧 English</button>
+            <button class="lang-option" onclick="switchLanguage('ms')">🇲🇾 Bahasa Melayu</button>
+            <button class="lang-option" onclick="switchLanguage('hi')">🇮🇳 हिन्दी</button>
+            <button class="lang-option" onclick="switchLanguage('zh')">🇨🇳 中文</button>
+          </div>
+        </div>
+        <div class="agent-status-badge" id="agent-status-badge">
+          <span class="status-dot idle"></span>
+          <span class="status-text">Agent Idle</span>
+        </div>
+        <button class="nav-mobile-toggle" id="nav-toggle" aria-label="Toggle navigation">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content" id="main-content"></main>
+
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal-content" id="modal-content"></div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
