@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { dataManager } from './services/data-manager.js';
 import { aiAgent } from './services/ai-agent.js';
 import { groqAnalyzer } from './services/groq-analyzer.js';
+import { socialDb } from './services/social-db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -22,6 +23,7 @@ app.use(express.json());
 const distPath = join(__dirname, '..', 'dist');
 const publicPath = join(__dirname, '..');
 let hasScheduledAgentStart = false;
+const SOCIAL_SERVER_POSTS_ONLY = process.env.SOCIAL_SERVER_POSTS_ONLY !== 'false';
 
 if (existsSync(distPath)) {
   // Production: serve built files
@@ -159,6 +161,216 @@ app.get('/api/providers', (req, res) => {
   res.json({
     groq: groqAnalyzer.getUsage(),
   });
+});
+
+// ============================================================
+// Social Feed API (Turso + Firebase Storage URLs)
+// ============================================================
+function toText(value, maxLength = 0) {
+  const text = String(value ?? '').trim();
+  if (!maxLength || maxLength <= 0) return text;
+  return text.slice(0, maxLength);
+}
+
+function toLimit(value, fallback, maxValue) {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(n, maxValue);
+}
+
+function socialActorFromRequest(req) {
+  const header = (name) => toText(req.get(name) || '');
+  return {
+    userId: toText(req.body?.userId, 80) || header('x-social-user-id'),
+    userName: toText(req.body?.userName, 80) || header('x-social-user-name'),
+    avatarUrl: toText(req.body?.avatarUrl, 1000) || header('x-social-user-avatar'),
+  };
+}
+
+function ensureSocialEnabled(res) {
+  if (socialDb.isEnabled()) return true;
+  res.status(503).json({
+    error: 'Social feed requires Turso configuration (TURSO_DATABASE_URL and TURSO_AUTH_TOKEN).',
+  });
+  return false;
+}
+
+app.get('/api/social/config', (req, res) => {
+  const firebaseConfig = {
+    apiKey: toText(process.env.FIREBASE_API_KEY),
+    authDomain: toText(process.env.FIREBASE_AUTH_DOMAIN),
+    projectId: toText(process.env.FIREBASE_PROJECT_ID),
+    storageBucket: toText(process.env.FIREBASE_STORAGE_BUCKET),
+    appId: toText(process.env.FIREBASE_APP_ID),
+    messagingSenderId: toText(process.env.FIREBASE_MESSAGING_SENDER_ID),
+  };
+
+  const firebaseEnabled = Boolean(
+    firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.storageBucket &&
+    firebaseConfig.appId
+  );
+
+  res.json({
+    enabled: socialDb.isEnabled(),
+    serverPostsOnly: SOCIAL_SERVER_POSTS_ONLY,
+    firebase: {
+      enabled: firebaseEnabled,
+      ...firebaseConfig,
+    },
+  });
+});
+
+app.get('/api/social/feed', async (req, res) => {
+  if (!ensureSocialEnabled(res)) return;
+
+  try {
+    const syncReport = await socialDb.syncTopicsAsServerPosts(dataManager.getAllTopics());
+
+    const payload = await socialDb.listFeed({
+      cursor: toText(req.query.cursor, 80),
+      limit: toLimit(req.query.limit, 12, 30),
+      viewerUserId: toText(req.query.viewerId, 80) || toText(req.get('x-social-user-id'), 80),
+      onlyServerPosts: SOCIAL_SERVER_POSTS_ONLY,
+    });
+
+    res.json({
+      ...payload,
+      serverPostsOnly: SOCIAL_SERVER_POSTS_ONLY,
+      sync: syncReport,
+    });
+  } catch (error) {
+    console.error('[Social] Feed error:', error.message);
+    res.status(500).json({ error: 'Failed to load social feed.' });
+  }
+});
+
+app.post('/api/social/posts', async (req, res) => {
+  if (!ensureSocialEnabled(res)) return;
+
+  if (SOCIAL_SERVER_POSTS_ONLY) {
+    return res.status(403).json({
+      error: 'Manual post creation is disabled. Topics are posted automatically by the server.',
+    });
+  }
+
+  try {
+    const content = toText(req.body?.content, 4000);
+    const imageUrl = toText(req.body?.imageUrl, 1400);
+    const imageStoragePath = toText(req.body?.imageStoragePath, 400);
+
+    if (!content && !imageUrl) {
+      return res.status(400).json({ error: 'Post must include text or an image.' });
+    }
+
+    const post = await socialDb.createPost({
+      actor: socialActorFromRequest(req),
+      content,
+      imageUrl,
+      imageStoragePath,
+    });
+
+    res.status(201).json({ post });
+  } catch (error) {
+    const statusCode = /required|empty/i.test(error.message) ? 400 : 500;
+    console.error('[Social] Create post error:', error.message);
+    res.status(statusCode).json({ error: error.message || 'Failed to create post.' });
+  }
+});
+
+app.get('/api/social/posts/:postId/comments', async (req, res) => {
+  if (!ensureSocialEnabled(res)) return;
+
+  try {
+    const comments = await socialDb.listComments(
+      req.params.postId,
+      toLimit(req.query.limit, 30, 80)
+    );
+
+    res.json({ comments });
+  } catch (error) {
+    console.error('[Social] List comments error:', error.message);
+    res.status(500).json({ error: 'Failed to load comments.' });
+  }
+});
+
+app.post('/api/social/posts/:postId/comments', async (req, res) => {
+  if (!ensureSocialEnabled(res)) return;
+
+  try {
+    const result = await socialDb.addComment({
+      postId: req.params.postId,
+      actor: socialActorFromRequest(req),
+      content: toText(req.body?.content, 1400),
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    const statusCode = /not found/i.test(error.message)
+      ? 404
+      : /required|empty/i.test(error.message)
+        ? 400
+        : 500;
+    console.error('[Social] Add comment error:', error.message);
+    res.status(statusCode).json({ error: error.message || 'Failed to add comment.' });
+  }
+});
+
+app.post('/api/social/posts/:postId/reaction', async (req, res) => {
+  if (!ensureSocialEnabled(res)) return;
+
+  try {
+    const result = await socialDb.toggleReaction({
+      postId: req.params.postId,
+      actor: socialActorFromRequest(req),
+      reactionType: toText(req.body?.reactionType || 'like', 32).toLowerCase(),
+    });
+
+    res.json(result);
+  } catch (error) {
+    const statusCode = /not found/i.test(error.message)
+      ? 404
+      : /unsupported|required/i.test(error.message)
+        ? 400
+        : 500;
+    console.error('[Social] Reaction error:', error.message);
+    res.status(statusCode).json({ error: error.message || 'Failed to update reaction.' });
+  }
+});
+
+app.post('/api/social/posts/:postId/share', async (req, res) => {
+  if (!ensureSocialEnabled(res)) return;
+
+  try {
+    const result = await socialDb.sharePost({
+      postId: req.params.postId,
+      actor: socialActorFromRequest(req),
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    const statusCode = /not found/i.test(error.message)
+      ? 404
+      : /required/i.test(error.message)
+        ? 400
+        : 500;
+    console.error('[Social] Share error:', error.message);
+    res.status(statusCode).json({ error: error.message || 'Failed to share post.' });
+  }
+});
+
+app.post('/api/social/sync-topics', async (req, res) => {
+  if (!ensureSocialEnabled(res)) return;
+
+  try {
+    const sync = await socialDb.syncTopicsAsServerPosts(dataManager.getAllTopics());
+    res.json({ success: true, sync });
+  } catch (error) {
+    console.error('[Social] Topic sync error:', error.message);
+    res.status(500).json({ error: 'Failed to sync topics into social feed.' });
+  }
 });
 
 // ============================================================

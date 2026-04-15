@@ -71,6 +71,82 @@ async function ensureSchema(client) {
       updated_at TEXT NOT NULL
     )
   `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS social_users (
+      id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      avatar_url TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS social_posts (
+      id TEXT PRIMARY KEY,
+      author_id TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      image_url TEXT,
+      image_storage_path TEXT,
+      comment_count INTEGER NOT NULL DEFAULT 0,
+      reaction_count INTEGER NOT NULL DEFAULT 0,
+      share_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      post_type TEXT NOT NULL DEFAULT 'user',
+      source_topic_id TEXT UNIQUE,
+      source_topic_payload TEXT,
+      FOREIGN KEY(author_id) REFERENCES social_users(id)
+    )
+  `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS social_comments (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL,
+      author_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(post_id) REFERENCES social_posts(id) ON DELETE CASCADE,
+      FOREIGN KEY(author_id) REFERENCES social_users(id)
+    )
+  `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS social_reactions (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      reaction_type TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(post_id, user_id),
+      FOREIGN KEY(post_id) REFERENCES social_posts(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES social_users(id)
+    )
+  `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS social_shares (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(post_id) REFERENCES social_posts(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES social_users(id)
+    )
+  `);
+
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_social_posts_created_at ON social_posts(created_at DESC)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_social_posts_author_id ON social_posts(author_id)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_social_posts_type ON social_posts(post_type)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_social_posts_source_topic_id ON social_posts(source_topic_id)');
+  await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_social_posts_source_topic_id ON social_posts(source_topic_id)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_social_comments_post_id ON social_comments(post_id, created_at ASC)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_social_reactions_post_id ON social_reactions(post_id)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_social_shares_post_id ON social_shares(post_id)');
 }
 
 async function importTopics(client, topics) {

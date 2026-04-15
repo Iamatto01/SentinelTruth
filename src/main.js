@@ -3,6 +3,7 @@ import { Chart, registerables } from 'chart.js';
 import { PARTIES, VERDICTS, COALITIONS, getAllPartyIds } from './data/parties.js';
 import { t, setLang } from './i18n/translations.js';
 import { formatDate, timeAgo, debounce, animateCounter, truncate } from './utils/helpers.js';
+import { renderSocialFeed, refreshSocialFeed } from './services/social-feed.js';
 
 Chart.register(...registerables);
 
@@ -19,6 +20,7 @@ const state = {
   cachedTopics: [],
   cachedStats: null,
   cachedQuality: null,
+  socialMounted: false,
 };
 
 const API = '';
@@ -222,7 +224,7 @@ function connectSSE() {
       // Debounced refresh — coalesces rapid SSE bursts into one render
       debouncedSSERender(() => {
         if (state.currentSection === 'dashboard') renderDashboard();
-        if (state.currentSection === 'topics') renderTopics();
+        if (state.currentSection === 'social') refreshSocialFeed();
         if (state.currentSection === 'statistics') renderStatistics();
       }, 500);
     }
@@ -236,6 +238,7 @@ function connectSSE() {
     debouncedSSERender(() => {
       if (state.currentSection === 'agent') renderAgent();
       if (state.currentSection === 'dashboard') renderDashboard();
+      if (state.currentSection === 'social') refreshSocialFeed();
       if (state.currentSection === 'statistics') renderStatistics();
     }, 500);
   });
@@ -260,6 +263,7 @@ function updateAgentBadge() {
 // Router
 // ============================================================
 function navigate(section) {
+  if (section === 'topics') section = 'social';
   state.currentSection = section;
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   const target = document.getElementById(`section-${section}`);
@@ -269,7 +273,12 @@ function navigate(section) {
   });
   document.getElementById('nav-links')?.classList.remove('active');
   if (section === 'dashboard') renderDashboard();
-  else if (section === 'topics') renderTopics();
+  else if (section === 'social') {
+    if (!state.socialMounted) {
+      state.socialMounted = true;
+      renderSocialFeed();
+    }
+  }
   else if (section === 'parties') renderParties();
   else if (section === 'statistics') renderStatistics();
   else if (section === 'agent') renderAgent();
@@ -292,11 +301,13 @@ function init() {
   const langSwitcher = document.getElementById('lang-switcher');
   if (langSwitcher) langSwitcher.remove();
 
+  const validSections = new Set(['dashboard', 'topics', 'social', 'parties', 'statistics', 'agent']);
   const hash = window.location.hash.slice(1) || 'dashboard';
-  navigate(hash);
+  navigate(validSections.has(hash) ? hash : 'dashboard');
 
   window.addEventListener('hashchange', () => {
-    navigate(window.location.hash.slice(1) || 'dashboard');
+    const next = window.location.hash.slice(1) || 'dashboard';
+    navigate(validSections.has(next) ? next : 'dashboard');
   });
 
   window.addEventListener('scroll', () => {
@@ -311,9 +322,10 @@ function init() {
 
 function createSections() {
   const main = document.getElementById('main-content');
+  state.socialMounted = false;
   main.innerHTML = `
     <section class="section active" id="section-dashboard"><div class="section-container" id="dashboard-content"></div></section>
-    <section class="section" id="section-topics"><div class="section-container" id="topics-content"></div></section>
+    <section class="section" id="section-social"><div class="section-container" id="social-content"></div></section>
     <section class="section" id="section-parties"><div class="section-container" id="parties-content"></div></section>
     <section class="section" id="section-statistics"><div class="section-container" id="statistics-content"></div></section>
     <section class="section" id="section-agent"><div class="section-container" id="agent-content"></div></section>
@@ -339,11 +351,16 @@ function setupModal() {
 }
 
 function updateNavLabels() {
-  const sectionToKeyMap = { dashboard: 'dashboard', topics: 'topics', parties: 'parties', statistics: 'statistics', agent: 'aiAgent' };
+  const sectionToKeyMap = { dashboard: 'dashboard', parties: 'parties', statistics: 'statistics', agent: 'aiAgent' };
   document.querySelectorAll('.nav-link').forEach(link => {
     const section = link.dataset.section;
     const labelEl = link.querySelector('.nav-label');
-    if (labelEl) labelEl.textContent = _(sectionToKeyMap[section] || section);
+    if (!labelEl) return;
+    if (section === 'social') {
+      labelEl.textContent = 'SOCIAL MEDIA';
+      return;
+    }
+    labelEl.textContent = _(sectionToKeyMap[section] || section);
   });
 }
 
@@ -433,7 +450,7 @@ async function renderDashboard() {
       <div class="dashboard-panel">
         <div class="panel-header">
           <div class="panel-title">📰 ${_('recentTopics')}</div>
-          <button class="panel-action" onclick="window.location.hash='topics'">${_('viewAll')}</button>
+          <button class="panel-action" onclick="window.location.hash='social'">${_('viewAll')}</button>
         </div>
         <div id="recent-topics-list">
           ${topics.map(t => renderRecentTopicItem(t)).join('')}
